@@ -1,0 +1,13 @@
+# Core (sim, training, evaluation, tests). Python 3.10, Windows.
+# torch is the CPU build: small MLP PPO is faster on CPU than on the GPU.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu
+mujoco==3.3.7
+gymnasium==1.2.2
+stable-baselines3==2.7.1
+numpy==2.2.6
+tensorboard==2.21.0
+imageio==2.38.0
+imageio-ffmpeg==0.8.1
+pytest==9.2.0
+ruff==0.17.6

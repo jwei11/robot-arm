@@ -1,0 +1,24 @@
+[project]
+name = "so101-rl"
+version = "0.1.0"
+description = "SO-101 reach task in MuJoCo with PPO, plus a gated real-arm runner"
+requires-python = ">=3.10,<3.11"
+
+[tool.setuptools]
+packages = ["so101_rl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+filterwarnings = ["ignore::UserWarning:gymnasium.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+# Only this project's files; your own scripts in the folder are never linted or reformatted.
+include = ["so101_rl/**/*.py", "tests/**/*.py", "train.py", "evaluate.py", "run_real.py"]
+extend-exclude = [".venv", "runs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]

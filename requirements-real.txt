@@ -1,0 +1,8 @@
+# Extra dependencies for run_real.py (real SO-101 arm via LeRobot).
+# Install on top of requirements.txt:
+#   .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-real.txt
+# torchvision is pinned to the CPU build that matches torch 2.6.0+cpu so pip does not pull a CUDA wheel.
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+torchvision==0.21.0+cpu
+lerobot[feetech]==0.4.4
