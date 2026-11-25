@@ -1,226 +1,218 @@
-# SO-101 reach: MuJoCo + PPO, with a gated real-arm runner
+# SO-101 Robot Arm: Reinforcement Learning in MuJoCo, Deployed to Hardware
 
-Train the SO-101 follower arm in MuJoCo to put its gripper tip on a random 3D target,
-evaluate it, and (carefully) run the trained policy on the real arm through LeRobot 0.4.4.
+A 5-joint [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm learns to move its
+gripper to any target point in front of it. The policy is trained with PPO in MuJoCo, evaluated
+on held-out targets, and run on the physical arm through [LeRobot](https://github.com/huggingface/lerobot)
+behind several layers of safety checks. A second, contact-rich task (pushing a block onto a
+goal) is in progress.
 
-```
-assets/so101/            official SO-101 MJCF + meshes (TheRobotStudio/SO-ARM100 @ 141aea7, Apache-2.0)
-  so101_new_calib.xml    unmodified robot model
-  reach_scene.xml        adds floor, lights, visual-only target marker
-so101_rl/
-  env.py                 SO101ReachEnv (Gymnasium), shared obs/action helpers
-  config.py              EnvConfig + DomainRandomization (all off by default)
-  kinematics.py          model loading, joint metadata, FK, IK (for checks)
-  targets.py             reachable target sampling
-  mapping.py             MuJoCo radians <-> LeRobot joint values
-  safety.py              clamp + per-step rate limit for real commands
-train.py  evaluate.py  run_real.py
-tests/                   pytest suite (tests/data has a copy of the my_follower calibration)
-```
+<p align="center"><img src="docs/reach_demo.gif" alt="Simulated SO-101 arm reaching three random targets" width="448"></p>
 
-Your earlier scripts (`keyboard_drive.py`, `nudge_test.py`, `teach_replay.py`) are untouched.
+## Results
 
-## Setup (Windows, PowerShell)
+| Task | Result (simulation) |
+|---|---|
+| Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
+| Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
+| Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
+| Push a block onto a goal | In progress (see [Push task](#push-task-in-progress)) |
 
-Python 3.10 from the Microsoft Store is fine; `py`/`python3.10` work even though its
-Scripts folder is not on PATH, because everything runs through the venv's python.
+The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
+measured yet.
+
+### How success went from 81.5% to 100%
+
+Each row is a single training run evaluated on 200 held-out targets:
+
+| Change | Steps | Success |
+|---|---|---|
+| Original reward, default policy noise | 2.4M | 80% |
+| Lower initial exploration noise + a precision reward term | 1.5M | 83% |
+| Same with 16 environments instead of 8 | 3M | 81.5% |
+| Train only on targets in front of the arm | 2M | 92.5% |
+| Spread training targets evenly over the reachable space | 2M | **100%** |
+
+1. **Check the task is solvable first.** Early training learned slowly. A scripted inverse-kinematics
+   controller using the same action interface reached 86%, which showed the problem was the
+   learning setup, not the task. Starting with less random exploration (`log_std_init = -1`) and
+   adding a reward term that rises sharply in the last few centimetres roughly halved the steps
+   needed.
+2. **More parallel environments isn't free.** With 16 environments each PPO iteration collects
+   twice as much data, so over the same number of steps the policy is updated half as often.
+   It learned more slowly per step (48% vs. 83% at 1.5M).
+3. **Break failures down before training longer.** 27 of the 37 misses at 81.5% were targets
+   behind the arm, which need it to flip over the top. Targets in front already succeeded 94% of
+   the time, and the arm's real tasks are all in front, so training was restricted to the front
+   half.
+4. **The training distribution is part of the model.** One remaining failure was reachable but
+   lay where random *joint angles* almost never put a target (0 of 3,000 samples within 3 cm).
+   `WorkspaceSampler` instead picks a 3 cm cell of the reachable space uniformly, then a point
+   inside it. On targets from either sampling method, the old policy scores about 92% and the
+   new one 100%.
+
+## Quick start (Windows, PowerShell)
+
+Requires Python 3.10.
 
 ```powershell
 python3.10 -m venv .venv
 ```
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-```
-```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
-For the real arm (adds LeRobot 0.4.4 with Feetech support, CPU torchvision):
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-real.txt
-```
-`requirements.txt` pins the direct dependencies; `requirements-lock.txt` is the full
-`pip freeze` of the tested sim environment. PyTorch is the **CPU** build on purpose: for
-PPO with a 256x256 MLP the bottleneck is MuJoCo stepping, and CPU is faster than
-shuttling tiny batches to the GPU.
-
-## Tests and lint
-
 ```powershell
 .\.venv\Scripts\python.exe -m pytest
 ```
+
+Train and evaluate the reach policy:
 ```powershell
-.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe train.py --run-name reach --timesteps 2000000
+```
+```powershell
+.\.venv\Scripts\python.exe evaluate.py --model runs\reach\best_model.zip --episodes 200
+```
+`evaluate.py` prints success rate and final distances and saves `runs\reach\rollouts.mp4`.
+Training progress is in TensorBoard (`.\.venv\Scripts\tensorboard.exe --logdir runs`).
+Every PPO and environment setting is a flag (`train.py --help`).
+
+For the real arm, also install LeRobot with Feetech servo support:
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-real.txt
 ```
 
-## Train
+`requirements.txt` pins direct dependencies; `requirements-lock.txt` is the full tested
+environment. PyTorch is the CPU build on purpose: with a 256×256 network the bottleneck is
+physics simulation, and moving tiny batches to a GPU is slower.
 
-```powershell
-.\.venv\Scripts\python.exe train.py --run-name ppo_reach_ws --timesteps 2000000
+## Project layout
+
 ```
-(Defaults: 3M steps, 8 parallel envs, targets spread evenly over the reachable space within 90 deg of straight ahead, PPO lr 3e-4, rollout 512 x 16, batch 512, 10 epochs,
-256x256 MLP, initial policy log-std -1.)
-Watch it:
-```powershell
-.\.venv\Scripts\tensorboard.exe --logdir runs
+so101_rl/
+  env.py          reach environment (Gymnasium); observation/action helpers shared with run_real.py
+  push_env.py     push-a-block environment
+  config.py       environment settings and domain randomization (off by default)
+  kinematics.py   model loading, forward kinematics, damped-least-squares IK
+  targets.py      reachable target sampling, including the even-coverage WorkspaceSampler
+  mapping.py      MuJoCo radians <-> LeRobot joint values
+  safety.py       joint clamping and per-step rate limiting for real commands
+  tasks.py        task name -> config and environment class
+train.py          PPO training (--task reach|push)
+evaluate.py       success rate, distance statistics, rollout video
+run_real.py       runs a trained reach policy on the physical arm (dry run by default)
+assets/so101/     official SO-101 MuJoCo model and meshes, plus reach and push scenes
+tests/            pytest suite (47 tests)
 ```
-Outputs in `runs\ppo_reach_ws\`: `best_model.zip` (best periodic eval), `final_model.zip`,
-`checkpoints\`, `eval\evaluations.npz`, `env_config.json` (the exact env settings, read back
-by `evaluate.py` and `run_real.py`). Add `--dr` to train with the sim-to-real randomization
-preset. All PPO settings are flags (`--help`).
 
-**How long, on this machine** (24 logical CPU threads, CPU-only torch): the default 3M-step
-run took **20.9 min** (2,400 steps/s with 16 envs); 2M steps with 8 envs took **17.0 min** (1,960 steps/s).
-
-**What to expect** (measured while building this):
-
-| Run | Steps | Eval success (final distance < 2 cm) |
-|---|---|---|
-| current defaults | 1.0M | 72% |
-| current defaults | 1.5M | 83% on 200 held-out episodes; median final distance 0.3 cm, mean 2.9 cm |
-| original reward, default PPO noise (std 1) | 1.0M / 2.4M | 56% / 80% |
-| all-around targets, 16 envs (`runs\ppo_reach`) | 3.0M | 81.5% on 200 held-out episodes (also 81.5% with `--dr`); median 0.4 cm |
-| front targets, joint-space sampling, 8 envs (`runs\ppo_reach_front`) | 2.0M | **92.5%** on 200 held-out front targets; median 0.2 cm, p90 0.7 cm; ~94% from 650k on |
-| **current defaults**: front targets spread evenly, 8 envs (`runs\ppo_reach_ws`) | 2.0M | **100%** on 200 held-out targets (99.5% with `--dr`); median 0.12 cm, p90 0.23 cm; 98% by 700k |
-
-The precision term and the smaller initial policy noise roughly halved the steps needed.
-The 1.5M rows used 8 envs; with 16 envs each PPO update sees twice the data, so there are half
-as many updates per step and the curve was slower (48% at 1.5M).
-
-Where it fails: 27 of the 37 misses in the 3M evaluation are targets **behind** the arm
-(bearing > 90 deg), which need an over-the-top configuration. On targets in front, success
-is 94% (157 of 167). So targets are now limited to `target_max_bearing_deg = 90` (all the
-`SAFE_TARGETS` are within 25 deg of straight ahead); `--max-bearing -1` restores all-around
-targets. Runs saved before this setting existed still evaluate with all-around targets.
-
-Coverage gaps: sampling uniformly random *joint* angles spreads targets unevenly in space.
-Close-in, high points (e.g. 18 cm out, 22 cm up) were rare, and the joint-sampled policy
-stalled about 4.5 cm short there even though an IK solution exists. `WorkspaceSampler`
-(`target_sampling = "workspace"`, the default) instead picks a 3 cm cell of the reachable
-space uniformly, then a reachable point inside it. Tested on 300 targets from *either*
-distribution, the joint-sampled policy gets about 92% and the workspace-sampled one 100%.
-It also reaches that old point to 0.1 cm. That safe target was still moved to
-(0.24, 0.05, 0.22), further inside the workspace. Each result is a single training run
-(one seed).
-
-## Evaluate
-
-```powershell
-.\.venv\Scripts\python.exe evaluate.py --model runs\ppo_reach_ws\best_model.zip --episodes 100
-```
-Prints success rate (final tip distance < 2 cm), mean/median/p90 final distance, and writes
-`runs\ppo_reach_ws\rollouts.mp4` with the first 3 episodes. `--dr` evaluates under randomization.
-
-## Environment
+## Reach environment
 
 | | |
 |---|---|
-| Control | 20 Hz (25 x 2 ms physics steps), 100 steps = 5 s episodes, no early termination |
-| Action | 5 values in [-1, 1] -> delta joint-position target, <= 0.05 rad (2.9 deg) per step, added to the previous *target* and clamped to the joint limits minus 5 deg. Gripper held fixed. |
-| Observation (24) | joint angles (5), finite-difference joint velocity (5), tip position (3), target (3), tip-to-target vector x5 (3), previous action (5) |
-| Reward | `-d + 0.5 * [d < 2 cm] + (1 - tanh(d / 5 cm)) - 0.01 * |a|^2`, d = tip-to-target distance [m] |
-| Targets | spread evenly over the reachable space (3 cm cells of a 300k-point FK pool); a point is kept if tip is >= 5 cm above the table, >= 12 cm from the base axis, within 90 deg of straight ahead (+x), and the arm is collision-free |
-| Tip point | the model's own `gripperframe` site: between the jaws, ~6 mm behind the jaw tips |
+| Control | 20 Hz (25 × 2 ms physics steps); 100-step (5 s) episodes |
+| Action | 5 values in [-1, 1]: change in each joint's position target, at most 0.05 rad (2.9°) per step, clamped to joint limits minus 5°. The gripper is held closed. |
+| Observation (24) | joint angles, joint velocities, tip position, target position, scaled tip-to-target vector, previous action |
+| Reward | `-d + 0.5·[d < 2 cm] + (1 - tanh(d / 5 cm)) - 0.01·|a|²`, where d is the tip-to-target distance in metres |
+| Targets | reachable by construction (forward kinematics of a valid, collision-free joint configuration), spread evenly over the reachable space, at least 5 cm above the table and within 90° of straight ahead |
+| Tip | the model's `gripperframe` site, between the jaws |
 
-The observation is built only from joint angles (FK and finite differences are computed
-from them), so the real arm, where LeRobot reports positions only, gets exactly the same
-inputs. `build_observation()` and `apply_action()` are shared by the env and `run_real.py`.
+Design choices:
+- **Joint position changes, not torques.** The real servos are position-controlled, so the policy
+  speaks the hardware's language, and small per-step changes are naturally smooth.
+- **Observations come only from joint angles.** Tip position and velocity are computed from
+  them, because the real arm reports positions only. Simulation and hardware share one
+  `build_observation()` function.
+- **Domain randomization hooks** (off by default; `--dr` turns on a preset): joint damping,
+  armature and friction; servo strength (0.4–1.2×, which covers 7.4 V servos on a 5 V supply);
+  joint-angle noise; and 0–2 steps of control delay.
 
-**Domain randomization** (`DomainRandomization`, off by default; each item independent):
-joint damping, armature, friction loss, actuator gain (kp and kv scaled together; values
-below 1 model your 7.4 V servos on a 5 V supply), Gaussian joint-angle noise, and 0..N steps
-of action latency. `DomainRandomization.sim2real()` is a starting preset; `--dr` uses it.
+## Push task (in progress)
 
-## Second task: push a block (sim only, in progress)
+`train.py --task push` trains the same arm, with the same actions, to push a 4 cm, 50 g cube
+onto a goal disc. Episodes are 10 s, and success means the block ends within 3 cm of the goal.
+This task is simulation only; `run_real.py` refuses push models.
 
-`--task push` trains the same arm to push a 4 cm, 50 g cube onto a goal disc on the table
-(`so101_rl/push_env.py`, `assets/so101/push_scene.xml`). Same 5-joint action interface and
-20 Hz. Episodes are 200 steps (10 s), and success means the block centre ends within 3 cm of
-the goal. The observation (31 values) adds block position, block velocity and goal. The reward
-pays for the tip being at a push point behind the block (on the side away from the goal), for
-each step's progress of the block toward the goal, and for being close to the goal.
-`run_real.py` refuses push models.
-
-Overnight run (about 7 h at ~1,200 steps/s):
-```powershell
-.\.venv\Scripts\python.exe train.py --task push --run-name push_overnight --timesteps 30000000 --eval-freq 250000 --checkpoint-freq 1000000
-```
-Then:
-```powershell
-.\.venv\Scripts\python.exe evaluate.py --model runs\push_overnight\best_model.zip --episodes 100
-```
-
-Trials so far (1.5M steps each, about 20 min):
-
-| Reward | Success | What the policy did |
+| Reward design | Success after 1.5M steps | What the policy did |
 |---|---|---|
-| near-block reach term + distance to goal | 6% | touched the block but pushed it in random directions |
-| push point + per-step progress (current) | 8% (best periodic eval 16% at 1.1M) | moves the block further (7.6 cm) but not yet consistently toward the goal |
+| Reward for being near the block, plus distance to goal | 6% | touched the block and shoved it in random directions |
+| Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 8% (16% at best checkpoint) | pushed the block further, but not yet consistently toward the goal |
 
-Pushing usually needs tens of millions of steps with PPO, so these trials only show the
-learning signal exists. They don't predict where it will end.
+The first design is a classic reward-shaping trap: touching the block earned reward on its
+own, so the policy learned to touch rather than push. A longer run (30M steps) is the next
+step.
 
-## Real arm: `run_real.py`
+## Running on the real arm
 
-**Default is a dry run**: it connects, reads the arm, and prints every command it would send.
-It sends nothing. Nothing in this project has been run against the real arm.
+`run_real.py` drives a calibrated SO-101 follower through LeRobot 0.4.4. **By default it is a
+dry run:** it connects, reads the arm, and prints every command it *would* send.
 
-1. Mapping check (read-only, no commands sent; writes `mapping_check.png`):
+1. Read-only mapping check. Renders what the simulator thinks the arm's pose is
+   (`mapping_check.png`) so it can be compared with the real arm. Nothing moves.
    ```powershell
    .\.venv\Scripts\python.exe run_real.py --check-mapping
    ```
-   With `--limp` torque is switched off so you can move the arm by hand: **support it first**.
 2. Dry run of the policy:
    ```powershell
-   .\.venv\Scripts\python.exe run_real.py --model runs\ppo_reach_ws\best_model.zip
+   .\.venv\Scripts\python.exe run_real.py --model runs\reach\best_model.zip
    ```
-3. Live (asks you to type `YES`):
+3. Live, one target first (asks you to type `YES`):
    ```powershell
-   .\.venv\Scripts\python.exe run_real.py --model runs\ppo_reach_ws\best_model.zip --live --targets 0
+   .\.venv\Scripts\python.exe run_real.py --model runs\reach\best_model.zip --live --targets 0
    ```
 
-Sequence: read the start pose, move slowly to the home pose, then for each of the fixed
-`SAFE_TARGETS` run the policy for `--steps` ticks and go back to home, finally return to the
-start pose and disconnect (torque off, as in your other scripts).
+The arm moves slowly to a home pose, runs the policy toward each of five fixed safe targets
+(returning home in between), then returns to its starting pose. `--fake` runs the whole
+sequence against a simulated arm.
 
-Safety layers every tick: action clipped to [-1, 1]; joint target clamped to the sim limits
-**and** your calibrated range minus 3 deg (LeRobot does not clamp in degrees mode); per-step
-change <= `--max-step-deg` (default 1.5 deg = 30 deg/s at 20 Hz, hard cap 3 deg); LeRobot's
-`max_relative_target` (default 5 deg vs. the measured position); targets only from the fixed
-list. **Ctrl+C** stops the policy and slowly returns to the start pose; **Ctrl+C again**
-holds the current pose and exits with torque left ON. `--fake` runs the whole script
-against a simulated arm.
+**Safety layers, every control step:**
+- policy action clipped to its valid range
+- joint targets clamped to the simulator's limits *and* the arm's calibrated range minus 3°
+  (LeRobot doesn't clamp in degrees mode)
+- at most 1.5° change per step (30°/s), with a hard cap of 3°
+- LeRobot's own `max_relative_target` (5° from the measured position)
+- targets only from a fixed list
+- **Ctrl+C** stops the policy and slowly returns to the start pose; a second Ctrl+C holds the
+  current pose
 
-### Units and mapping (LeRobot 0.4.4)
+### Joint units and mapping
 
-* `SO101FollowerConfig.use_degrees` defaults to **True** in 0.4.4. Your scripts do not set
-  it, so the values they print and `waypoints.json` are **degrees**, not -100..100
-  (e.g. shoulder_pan -16.3956 is exactly raw tick 1861). The "-100..100" comment in
-  `keyboard_drive.py` is out of date; its +/-100 clamp is really +/-100 deg.
-* Degrees mode: `deg = (raw - mid) * 360 / 4095`, `mid = (range_min + range_max) / 2` from
-  the calibration file. It ignores `drive_mode` and does not clamp on write.
-* Mapping used: `q_mujoco = sign * deg2rad(lerobot_deg - offset)`, with **sign = +1 and
-  offset = 0 for every joint**. Evidence: (1) the official `so101_new_calib.xml` puts zero at
-  mid-range, the same reference LeRobot's degrees use; (2) LeRobot's own SO-101 kinematics
-  (`lerobot/model/kinematics.py`) feeds degrees into the same model with plain `deg2rad`;
-  (3) your recorded calibrated half-ranges (lift 105, elbow 98, wrist_flex 99 deg) match the
-  model's (100, 97, 95 deg); (4) all 6 of your `waypoints.json` poses land inside the model's
-  limits, and flipping shoulder_lift drives every one of them into the floor.
-* `--range-mode` supports `use_degrees=False`; tests verify both modes against LeRobot's
-  actual `_normalize`/`_unnormalize` and the int-tick quantization (< 1 tick error).
+LeRobot 0.4.4 reports joints in degrees by default:
+`deg = (raw - mid) · 360 / 4095`, where `mid` is the middle of the calibrated range.
+The official MuJoCo model also puts each joint's zero at mid-range, so the mapping is
+`q_mujoco = deg2rad(lerobot_deg)` with no sign flips or offsets. The evidence:
+- the model's zero convention matches LeRobot's
+- LeRobot's own SO-101 kinematics uses plain `deg2rad` with the same model
+- the calibrated joint ranges match the model's
+- recorded real poses all land inside the model's limits, and flipping a joint's sign puts
+  them in the floor
+- `pose_check.py` renders were checked by eye against the real arm
 
-### Assumptions to verify on the hardware
+The tests check the mapping against LeRobot's actual normalize/unnormalize code in both unit
+modes, including rounding to integer servo ticks. `--sign joint=-1` overrides a joint if a
+rebuilt arm turns the other way.
 
-1. **Joint directions** for elbow_flex and wrist_flex (and pan/roll). Run `--check-mapping`
-   and compare `mapping_check.png` with the arm. If a joint bends the wrong way, pass
-   e.g. `--sign elbow_flex=-1` (and use the same for the policy run).
-2. **Zero**: at the pose where the upper arm is vertical and the forearm points straight
-   forward horizontally, `--check-mapping` should print about 0 deg for lift/elbow/wrist_flex.
-   A few degrees off is expected from calibration; much more means an offset is needed.
-3. Your folded rest pose shows a few mm of overlap between collision hulls at the elbow stop
-   in sim; that is a hull approximation, not a mapping error.
-4. `shoulder_pan` was calibrated over the full 0..4095 ticks, so its calibrated range gives
-   no protection; the sim limit (+/-105 deg after margins) is what clamps it.
-5. Servo strength: 5 V supply means less torque and speed than the sim's STS3215 model.
-   If tracking lags, retrain with `--dr`.
-6. Connecting through LeRobot enables torque and rewrites PID/acceleration registers
-   (normal LeRobot behaviour, same as your other scripts).
+Known sim-to-real differences: the simulated servos are full strength; the real arm runs at
+about half the policy's training speed because of the 1.5° safety cap; and gear backlash and
+calibration error aren't modelled.
+
+## Other hardware scripts
+
+Utilities written while bringing up the arm. All use LeRobot on `COM20` with calibration id
+`my_follower`; change these for your setup.
+
+| Script | What it does |
+|---|---|
+| `pose_check.py` | read-only, torque off: renders the simulator's view of the current pose |
+| `keyboard_drive.py` | drive one joint at a time from the keyboard |
+| `xyz_control.py` | move the gripper in x/y/z centimetres using the model's kinematics |
+| `teach_replay.py` | pose the arm by hand at waypoints, then replay them smoothly |
+| `record_motion.py` | record a hand-guided motion at 50 Hz and play it back (`motions/`) |
+| `monitor.py`, `arm_guard.py` | live servo telemetry and bump detection |
+| `bump_test.py`, `nudge_test.py` | measure tracking error and load; small motion test |
+
+## Acknowledgements
+
+The SO-101 MuJoCo model and meshes in `assets/so101/` are from
+[TheRobotStudio/SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) (commit 141aea7),
+Apache-2.0; see `assets/so101/LICENSE`. Training uses
+[Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) and
+[Gymnasium](https://github.com/Farama-Foundation/Gymnasium); hardware access uses
+[LeRobot](https://github.com/huggingface/lerobot).
