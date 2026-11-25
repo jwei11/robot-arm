@@ -20,17 +20,28 @@ goal) is in progress.
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
 
-### How success went from 81.5% to 100%
+### How success reached 100%
 
-Each row is a single training run evaluated on 200 held-out targets:
+All three models below were scored on the **same** 200 held-out targets (front workspace,
+spread evenly):
+
+| Model | Training targets | Success | Median miss |
+|---|---|---|---|
+| Original | all around the arm, random joint angles | 90.0% | 0.46 cm |
+| Scoped to the front | front only, random joint angles | 90.0% | 0.19 cm |
+| **Even coverage** | front only, spread evenly over the reachable space | **100%** | **0.12 cm** |
+
+Scoping to the front matched training to the real job but didn't by itself improve
+accuracy. Even coverage of the workspace is what took success from 90% to 100%. Each row is
+a single training run (one seed).
+
+Earlier runs, each scored on its own training distribution:
 
 | Change | Steps | Success |
 |---|---|---|
 | Original reward, default policy noise | 2.4M | 80% |
 | Lower initial exploration noise + a precision reward term | 1.5M | 83% |
-| Same with 16 environments instead of 8 | 3M | 81.5% |
-| Train only on targets in front of the arm | 2M | 92.5% |
-| Spread training targets evenly over the reachable space | 2M | **100%** |
+| Same with 16 environments instead of 8 | 3M | 81.5% (targets all around the arm) |
 
 1. **Check the task is solvable first.** Early training learned slowly. A scripted inverse-kinematics
    controller using the same action interface reached 86%, which showed the problem was the
@@ -41,14 +52,12 @@ Each row is a single training run evaluated on 200 held-out targets:
    twice as much data, so over the same number of steps the policy is updated half as often.
    It learned more slowly per step (48% vs. 83% at 1.5M).
 3. **Break failures down before training longer.** 27 of the 37 misses at 81.5% were targets
-   behind the arm, which need it to flip over the top. Targets in front already succeeded 94% of
-   the time, and the arm's real tasks are all in front, so training was restricted to the front
-   half.
+   behind the arm, which need it to flip over the top. The arm's real tasks are all in front,
+   so the task was scoped to the front half.
 4. **The training distribution is part of the model.** One remaining failure was reachable but
    lay where random *joint angles* almost never put a target (0 of 3,000 samples within 3 cm).
    `WorkspaceSampler` instead picks a 3 cm cell of the reachable space uniformly, then a point
-   inside it. On targets from either sampling method, the old policy scores about 92% and the
-   new one 100%.
+   inside it. On the same test targets, that took success from 90% to 100%.
 
 ## Quick start (Windows, PowerShell)
 
