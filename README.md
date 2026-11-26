@@ -3,8 +3,8 @@
 A 5-joint [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm learns to move its
 gripper to any target point in front of it. The policy is trained with PPO in MuJoCo, evaluated
 on held-out targets, and run on the physical arm through [LeRobot](https://github.com/huggingface/lerobot)
-behind several layers of safety checks. A second, contact-rich task (pushing a block onto a
-goal) is in progress.
+behind several layers of safety checks. A second, contact-rich task trains the arm to push a
+block onto a goal.
 
 <p align="center"><img src="docs/reach_demo.gif" alt="Simulated SO-101 arm reaching three random targets" width="448"></p>
 
@@ -15,7 +15,7 @@ goal) is in progress.
 | Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
 | Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
 | Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
-| Push a block onto a goal | In progress (see [Push task](#push-task-in-progress)) |
+| Push a block onto a goal (within 3 cm) | **42.5%** on 200 held-out episodes after 30M steps, up from 6% with the first reward design (see [Push task](#push-task)) |
 
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
@@ -133,20 +133,37 @@ Design choices:
   armature and friction; servo strength (0.4–1.2×, which covers 7.4 V servos on a 5 V supply);
   joint-angle noise; and 0–2 steps of control delay.
 
-## Push task (in progress)
+## Push task
+
+<p align="center"><img src="docs/push_demo.gif" alt="Simulated SO-101 arm pushing a blue block onto a green goal disc" width="432"></p>
 
 `train.py --task push` trains the same arm, with the same actions, to push a 4 cm, 50 g cube
-onto a goal disc. Episodes are 10 s, and success means the block ends within 3 cm of the goal.
-This task is simulation only; `run_real.py` refuses push models.
+onto a goal disc 6–15 cm away. Episodes are 10 s, and success means the block ends within 3 cm
+of the goal. This task is simulation only; `run_real.py` refuses push models.
 
-| Reward design | Success after 1.5M steps | What the policy did |
-|---|---|---|
-| Reward for being near the block, plus distance to goal | 6% | touched the block and shoved it in random directions |
-| Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 8% (16% at best checkpoint) | pushed the block further, but not yet consistently toward the goal |
+| Reward design | Steps | Success (held-out episodes: 100, 100, 200) | What the policy did |
+|---|---|---|---|
+| Reward for being near the block, plus distance to goal | 1.5M | 6% | touched the block and shoved it in random directions |
+| Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 1.5M | 8% | pushed the block further, not yet toward the goal |
+| Same | 30M (5.3 h) | **42.5%** | moves the block toward the goal in 53 of 60 checked episodes; average block-to-goal distance 10 cm → 6 cm |
 
 The first design is a classic reward-shaping trap: touching the block earned reward on its
-own, so the policy learned to touch rather than push. A longer run (30M steps) is the next
-step.
+own, so the policy learned to touch rather than push.
+
+What limits it now:
+- **It plateaus early.** Success reached about 40–45% by 5M steps and stayed there for the
+  remaining 25M.
+- **Near misses and overshoot.** 52% of episodes get the block into the goal at some point, but
+  9.5% push it back out. The median closest approach is 2.7 cm, just inside the 3 cm line.
+- **Longer pushes are harder:** 50% success when the block starts 6–9 cm from the goal, 31–38%
+  beyond that.
+- **Picking the "best" checkpoint misled.** The checkpoint that scored 60% on a 50-episode check
+  scored 38% on 200 fresh episodes; the final model scored 42.5%. With small evaluations, the
+  highest score is partly luck.
+
+Likely next steps: a curriculum (start with the goal close to the block and move it further
+as success improves), a reward term for holding the block in the goal, or an off-policy
+method such as SAC.
 
 ## Running on the real arm
 
