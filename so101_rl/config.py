@@ -118,6 +118,10 @@ class PushConfig:
     # The push point is behind the block on the side away from the goal, at block-centre
     # height, push_point_offset from the block centre. Rewarding "near the block" instead
     # taught the first pilot to touch the block and shove it in random directions.
+    # "v2" is the reward above. "v1" is the first design, kept as a baseline: its reach term
+    # uses the distance to the block centre instead of the push point, it has no progress
+    # term, and it is used with push_linear = 3 (see PushConfig.v1()).
+    reward_version: str = "v2"
     reach_weight: float = 0.5
     push_point_offset: float = 0.035  # [m]
     progress_weight: float = 50.0  # per metre of block progress toward the goal, each step
@@ -131,5 +135,13 @@ class PushConfig:
         return asdict(self)
 
     @classmethod
+    def v1(cls) -> PushConfig:
+        """The first push reward design (6% after 1.5M steps), for baseline comparisons."""
+        return cls(reward_version="v1", push_linear=3.0)
+
+    @classmethod
     def from_dict(cls, d: dict) -> PushConfig:
+        d = dict(d)
+        # Configs saved before reward versions existed: v1 had no progress term.
+        d.setdefault("reward_version", "v2" if "progress_weight" in d else "v1")
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in d.items()})

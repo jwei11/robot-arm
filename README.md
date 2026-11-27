@@ -15,7 +15,7 @@ block onto a goal.
 | Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
 | Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
 | Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
-| Push a block onto a goal (within 3 cm) | **42.5%** on 200 held-out episodes after 30M steps, up from 6% with the first reward design (see [Push task](#push-task)) |
+| Push a block onto a goal (within 3 cm) | **84%** on 200 held-out episodes (best of two seeds; the other reached 42.5%), vs. 4.5–6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
 
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
@@ -109,7 +109,7 @@ train.py          PPO training (--task reach|push)
 evaluate.py       success rate, distance statistics, rollout video
 run_real.py       runs a trained reach policy on the physical arm (dry run by default)
 assets/so101/     official SO-101 MuJoCo model and meshes, plus reach and push scenes
-tests/            pytest suite (47 tests)
+tests/            pytest suite (56 tests)
 ```
 
 ## Reach environment
@@ -141,29 +141,39 @@ Design choices:
 onto a goal disc 6–15 cm away. Episodes are 10 s, and success means the block ends within 3 cm
 of the goal. This task is simulation only; `run_real.py` refuses push models.
 
-| Reward design | Steps | Success (held-out episodes: 100, 100, 200) | What the policy did |
+| Reward design | Steps | Success (held-out episodes) | What the policy did |
 |---|---|---|---|
-| Reward for being near the block, plus distance to goal | 1.5M | 6% | touched the block and shoved it in random directions |
-| Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 1.5M | 8% | pushed the block further, not yet toward the goal |
-| Same | 30M (5.3 h) | **42.5%** | moves the block toward the goal in 53 of 60 checked episodes; average block-to-goal distance 10 cm → 6 cm |
+| Reward for being near the block, plus distance to goal | 1.5M | 6% (100) | touched the block and shoved it in random directions |
+| Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 1.5M | 8% (100) | pushed the block further, not yet toward the goal |
+| Same, seed 0 | 30M (5.3 h) | 42.5% (200) | plateaued at 40–45% from 5M steps on |
+| **Same, seed 1** | 20M (4.4 h) | **84%** (200) | median final block-to-goal distance 1.6 cm |
+| Same reward + goal-distance curriculum, seed 0 | 20M (4.5 h) | 77% (200) | still improving when training ended |
+| First design again, seeds 0 and 1 (same-budget baseline) | 20M each (4.8 h) | 4.5% and 6% (200) | still touching and shoving after 20M steps |
 
 The first design is a classic reward-shaping trap: touching the block earned reward on its
-own, so the policy learned to touch rather than push.
+own, so the policy learned to touch rather than push. More training does not fix it: at the same
+20M steps, the first design reached 4.5% and 6% on the two seeds, against 42.5% and 84% for
+the second.
 
-What limits it now:
-- **It plateaus early.** Success reached about 40–45% by 5M steps and stayed there for the
-  remaining 25M.
-- **Near misses and overshoot.** 52% of episodes get the block into the goal at some point, but
-  9.5% push it back out. The median closest approach is 2.7 cm, just inside the 3 cm line.
-- **Longer pushes are harder:** 50% success when the block starts 6–9 cm from the goal, 31–38%
-  beyond that.
-- **Picking the "best" checkpoint misled.** The checkpoint that scored 60% on a 50-episode check
-  scored 38% on 200 fresh episodes; the final model scored 42.5%. With small evaluations, the
-  highest score is partly luck.
+**Run-to-run variation is the biggest effect.** The same code and settings gave 42.5% with
+one random seed and 84% with another. That gap is larger than anything the curriculum did,
+so one run per setting can't show whether a change helped. The curriculum run (77%) beat the
+same-seed baseline (42.5%, trained for 30M steps), but with two seeds per setting that could still be chance. It
+also moved slowly: training success took 10M steps to pass 50% on the easiest goals.
 
-Likely next steps: a curriculum (start with the goal close to the block and move it further
-as success improves), a reward term for holding the block in the goal, or an off-policy
-method such as SAC.
+Other findings from the 42.5% run:
+- **Near misses and overshoot.** 52% of episodes got the block into the goal at some point,
+  but 9.5% pushed it back out.
+- **Longer pushes are harder:** 50% success when the block started 6–9 cm from the goal,
+  31–38% beyond that.
+- **Picking the "best" checkpoint misled.** The checkpoint that scored 60% on a 50-episode
+  check scored 38% on 200 fresh episodes. Periodic checks now use 100 episodes, and final
+  numbers are always on 200 fresh episodes.
+
+`train.py --task push --curriculum` starts goals 4–7 cm from the block and widens the range in
+four steps up to 6–15 cm, each time training success over the last 200 episodes reaches 50%.
+Evaluation always uses the full range. Likely next steps: three or more seeds per setting, a
+faster curriculum, a reward term for holding the block in the goal, or SAC.
 
 ## Running on the real arm
 

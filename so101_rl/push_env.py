@@ -69,6 +69,8 @@ class SO101PushEnv(gym.Env):
         self.block_qadr = m.jnt_qposadr[m.joint("block_joint").id]
         self.block_body = m.body("block").id
         self.goal_mocap = m.body_mocapid[m.body("goal").id]
+        # Goal distance range from the block [m]; a training curriculum may narrow it.
+        self.goal_offset = tuple(self.cfg.goal_offset)
 
         lim = m.jnt_range[jids]
         self.q_low = lim[:, 0] + self.cfg.limit_margin
@@ -156,7 +158,7 @@ class SO101PushEnv(gym.Env):
         c = self.cfg
         for _ in range(1000):
             ang = rng.uniform(-np.pi, np.pi)
-            g = block_xy + rng.uniform(*c.goal_offset) * np.array([np.cos(ang), np.sin(ang)])
+            g = block_xy + rng.uniform(*self.goal_offset) * np.array([np.cos(ang), np.sin(ang)])
             r, b = np.hypot(*g), np.degrees(np.arctan2(g[1], g[0]))
             if c.goal_radius[0] <= r <= c.goal_radius[1] and abs(b) <= c.goal_max_bearing_deg:
                 return g
@@ -169,6 +171,10 @@ class SO101PushEnv(gym.Env):
         u = to_goal / n if n > 1e-6 else np.zeros(2)
         return np.array([*(block[:2] - u * self.cfg.push_point_offset), block[2]])
 
+    def set_goal_offset(self, low: float, high: float) -> None:
+        """Change how far from the block new goals are placed (used by the curriculum)."""
+        self.goal_offset = (float(low), float(high))
+
     def step(self, action):
         a = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
         self.q_target = apply_action(self.q_target, a, self.cfg.max_delta, self.q_low, self.q_high)
@@ -180,7 +186,8 @@ class SO101PushEnv(gym.Env):
 
         d_prev = self._d_bg_prev
         info = self._info()
-        reward = self.compute_reward(info["ee_to_push_point"], info["distance"], d_prev, a)
+        d_reach = info["ee_to_push_point"] if self.cfg.reward_version == "v2" else info["ee_to_block"]
+        reward = self.compute_reward(d_reach, info["distance"], d_prev, a)
         self._d_bg_prev = info["distance"]
         self.prev_action = a
         truncated = self.step_count >= self.cfg.episode_steps
@@ -189,7 +196,7 @@ class SO101PushEnv(gym.Env):
     def compute_reward(self, d_ep: float, d_bg: float, d_bg_prev: float, action: np.ndarray) -> float:
         c = self.cfg
         reach = c.reach_weight * (1.0 - np.tanh(d_ep / c.reward_scale))
-        progress = c.progress_weight * (d_bg_prev - d_bg)
+        progress = c.progress_weight * (d_bg_prev - d_bg) if c.reward_version == "v2" else 0.0
         push = progress - c.push_linear * d_bg + c.push_weight * (1.0 - np.tanh(d_bg / c.reward_scale))
         bonus = c.success_bonus if d_bg < c.success_radius else 0.0
         return float(reach + push + bonus - c.action_penalty * float(np.sum(np.square(action))))

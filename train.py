@@ -1,4 +1,4 @@
-"""Train PPO on the SO-101 reach task.
+"""Train PPO on the SO-101 reach or push task.
 
 Example (PowerShell):
   .\\.venv\\Scripts\\python.exe train.py --timesteps 2000000 --run-name ppo_reach
@@ -19,6 +19,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from so101_rl.config import DomainRandomization, EnvConfig, PushConfig
+from so101_rl.curriculum import GoalDistanceCurriculum
 from so101_rl.tasks import config_to_dict, env_class_for
 
 
@@ -31,6 +32,17 @@ def parse_args(argv=None):
     p.add_argument("--run-name", default="ppo_reach")
     p.add_argument("--logdir", type=Path, default=Path("runs"))
     p.add_argument("--dr", action="store_true", help="enable the sim2real domain-randomization preset")
+    p.add_argument(
+        "--reward",
+        choices=["v1", "v2"],
+        default="v2",
+        help="push only: v2 (current) or v1, the first reward design, for baseline comparisons",
+    )
+    p.add_argument(
+        "--curriculum",
+        action="store_true",
+        help="push only: start with goals near the block, move them out as training success passes 50%%",
+    )
     # PPO
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--n-steps", type=int, default=512, help="rollout length per env")
@@ -67,8 +79,10 @@ def main(argv=None) -> Path:
     if args.task == "push":
         if args.dr or args.precision_weight is not None or args.max_bearing is not None:
             raise SystemExit("--dr, --precision-weight and --max-bearing apply to the reach task only")
-        cfg = PushConfig()
+        cfg = PushConfig.v1() if args.reward == "v1" else PushConfig()
     else:
+        if args.curriculum or args.reward != "v2":
+            raise SystemExit("--curriculum and --reward apply to the push task only")
         cfg = EnvConfig(dr=DomainRandomization.sim2real() if args.dr else DomainRandomization())
     if args.precision_weight is not None:
         cfg.precision_weight = args.precision_weight
@@ -99,8 +113,14 @@ def main(argv=None) -> Path:
         verbose=1,
     )
     per_env = lambda n: max(1, n // args.n_envs)  # noqa: E731 - callbacks count per-env calls
+    extra = []
+    if args.curriculum:
+        extra.append(
+            GoalDistanceCurriculum(start=(0.04, 0.07), end=tuple(cfg.goal_offset), log_path=run_dir / "curriculum.json")
+        )
     callbacks = CallbackList(
         [
+            *extra,
             CheckpointCallback(per_env(args.checkpoint_freq), str(run_dir / "checkpoints"), name_prefix="ppo"),
             EvalCallback(
                 eval_env,

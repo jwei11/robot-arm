@@ -109,3 +109,46 @@ def test_render():
     img = e.render()
     assert img.shape == (480, 640, 3) and img.std() > 1
     e.close()
+
+
+def test_goal_offset_can_be_narrowed():
+    e = SO101PushEnv()
+    e.set_goal_offset(0.04, 0.05)
+    for seed in range(20):
+        e.reset(seed=seed)
+        d = np.linalg.norm(e.goal_xy - e.block_pos()[:2])
+        assert 0.04 - 1e-6 <= d <= 0.05 + 1e-6
+
+
+def test_curriculum_stage_ranges():
+    from so101_rl.curriculum import stage_range
+
+    start, end = (0.04, 0.07), (0.06, 0.15)
+    assert stage_range(0, 5, start, end) == start
+    np.testing.assert_allclose(stage_range(4, 5, start, end), end)
+    np.testing.assert_allclose(stage_range(2, 5, start, end), (0.05, 0.11))
+    np.testing.assert_allclose(stage_range(9, 5, start, end), end)
+
+
+def test_v1_reward_is_the_first_design():
+    v1 = SO101PushEnv(PushConfig.v1())
+    v2 = SO101PushEnv()
+    a = np.zeros(5)
+    # v1 has no progress term: same distances, different previous distance -> same reward
+    assert v1.compute_reward(0.05, 0.10, 0.12, a) == v1.compute_reward(0.05, 0.10, 0.10, a)
+    assert v2.compute_reward(0.05, 0.10, 0.12, a) > v2.compute_reward(0.05, 0.10, 0.10, a)
+    # v1 linear term is 3 per metre
+    np.testing.assert_allclose(
+        v1.compute_reward(0.05, 0.10, 0.10, a) - v1.compute_reward(0.05, 0.11, 0.11, a),
+        3.0 * 0.01 + (np.tanh(0.11 / 0.05) - np.tanh(0.10 / 0.05)),
+    )
+
+
+def test_saved_configs_get_the_right_reward_version():
+    old_v1 = PushConfig.v1().to_dict()
+    for k in ("reward_version", "progress_weight", "push_point_offset"):
+        del old_v1[k]  # the first pilot's config had none of these
+    assert PushConfig.from_dict(old_v1).reward_version == "v1"
+    old_v2 = PushConfig().to_dict()
+    del old_v2["reward_version"]  # overnight runs saved before reward versions existed
+    assert PushConfig.from_dict(old_v2).reward_version == "v2"
