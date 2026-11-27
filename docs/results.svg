@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 310" width="760" height="310" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Results: push success by reward design and seed; reach success by training-target coverage</title>
+  <rect x="0.5" y="0.5" width="759" height="309" rx="12" fill="#ffffff" stroke="#e4e3dd"/>
+
+  <!-- Panel A: push -->
+  <text x="20" y="34" font-size="15" font-weight="600" fill="#1a1a19">Pushing a block: reward redesign</text>
+  <text x="20" y="53" font-size="12" fill="#6b6a63">Success on 200 test episodes, both rewards at 20M training steps</text>
+  <rect x="20" y="64" width="10" height="10" rx="2" fill="#eb6834"/>
+  <text x="35" y="73" font-size="12" fill="#3d3d3a">First reward</text>
+  <rect x="120" y="64" width="10" height="10" rx="2" fill="#2a78d6"/>
+  <text x="135" y="73" font-size="12" fill="#3d3d3a">Redesigned reward</text>
+
+  <g stroke="#e4e3dd" stroke-width="1">
+    <line x1="56" y1="90" x2="356" y2="90"/>
+    <line x1="56" y1="170" x2="356" y2="170"/>
+  </g>
+  <line x1="56" y1="250" x2="356" y2="250" stroke="#b9b8b0" stroke-width="1"/>
+  <g font-size="11" fill="#6b6a63" text-anchor="end">
+    <text x="50" y="94">100%</text>
+    <text x="50" y="174">50%</text>
+    <text x="50" y="254">0%</text>
+  </g>
+
+  <path d="M98,250 V246.8 Q98,242.8 102,242.8 H134 Q138,242.8 138,246.8 V250 Z" fill="#eb6834"/>
+  <path d="M142,250 V191.6 Q142,187.6 146,187.6 H178 Q182,187.6 182,191.6 V250 Z" fill="#2a78d6"/>
+  <path d="M238,250 V244.4 Q238,240.4 242,240.4 H274 Q278,240.4 278,244.4 V250 Z" fill="#eb6834"/>
+  <path d="M282,250 V119.6 Q282,115.6 286,115.6 H318 Q322,115.6 322,119.6 V250 Z" fill="#2a78d6"/>
+
+  <g font-size="12" font-weight="600" fill="#1a1a19" text-anchor="middle">
+    <text x="118" y="236">4.5%</text>
+    <text x="162" y="181">39%</text>
+    <text x="258" y="234">6%</text>
+    <text x="302" y="109">84%</text>
+  </g>
+  <g font-size="12" fill="#3d3d3a" text-anchor="middle">
+    <text x="140" y="270">Seed 0</text>
+    <text x="280" y="270">Seed 1</text>
+  </g>
+
+  <line x1="386" y1="24" x2="386" y2="286" stroke="#e4e3dd"/>
+
+  <!-- Panel B: reach -->
+  <text x="410" y="34" font-size="15" font-weight="600" fill="#1a1a19">Reaching: where training targets come from</text>
+  <text x="410" y="53" font-size="12" fill="#6b6a63">Success on the same 200 test targets (tip within 2 cm)</text>
+
+  <g stroke="#e4e3dd" stroke-width="1">
+    <line x1="446" y1="90" x2="740" y2="90"/>
+    <line x1="446" y1="170" x2="740" y2="170"/>
+  </g>
+  <line x1="446" y1="250" x2="740" y2="250" stroke="#b9b8b0" stroke-width="1"/>
+  <g font-size="11" fill="#6b6a63" text-anchor="end">
+    <text x="440" y="94">100%</text>
+    <text x="440" y="174">50%</text>
+    <text x="440" y="254">0%</text>
+  </g>
+
+  <path d="M468,250 V110 Q468,106 472,106 H516 Q520,106 520,110 V250 Z" fill="#2a78d6"/>
+  <path d="M567,250 V110 Q567,106 571,106 H615 Q619,106 619,110 V250 Z" fill="#2a78d6"/>
+  <path d="M666,250 V94 Q666,90 670,90 H714 Q718,90 718,94 V250 Z" fill="#2a78d6"/>
+
+  <g font-size="12" font-weight="600" fill="#1a1a19" text-anchor="middle">
+    <text x="494" y="100">90%</text>
+    <text x="593" y="100">90%</text>
+    <text x="692" y="84">100%</text>
+  </g>
+  <g font-size="12" fill="#3d3d3a" text-anchor="middle">
+    <text x="494" y="270">All around,</text>
+    <text x="494" y="285">random joints</text>
+    <text x="593" y="270">Front only,</text>
+    <text x="593" y="285">random joints</text>
+    <text x="692" y="270">Front only,</text>
+    <text x="692" y="285">evenly spread</text>
+  </g>
+</svg>

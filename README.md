@@ -1,12 +1,44 @@
 # SO-101 Robot Arm: Reinforcement Learning in MuJoCo, Deployed to Hardware
 
-A 5-joint [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm learns to move its
-gripper to any target point in front of it. The policy is trained with PPO in MuJoCo, evaluated
-on held-out targets, and run on the physical arm through [LeRobot](https://github.com/huggingface/lerobot)
-behind several layers of safety checks. A second, contact-rich task trains the arm to push a
-block onto a goal.
+[![tests](https://github.com/jwei11/robot-arm/actions/workflows/tests.yml/badge.svg)](https://github.com/jwei11/robot-arm/actions/workflows/tests.yml)
+![Python 3.10](https://img.shields.io/badge/python-3.10-3776ab)
+![MuJoCo](https://img.shields.io/badge/sim-MuJoCo%203.3-555)
+![PPO](https://img.shields.io/badge/RL-PPO%20(Stable--Baselines3)-555)
+![LeRobot](https://img.shields.io/badge/hardware-LeRobot-555)
 
-<p align="center"><img src="docs/reach_demo.gif" alt="Simulated SO-101 arm reaching three random targets" width="448"></p>
+A 5-joint [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm learns two skills
+with reinforcement learning in simulation: moving its gripper to any target in front of it,
+and pushing a block onto a goal. The reach policy also runs on the physical arm through
+[LeRobot](https://github.com/huggingface/lerobot), behind several layers of safety checks.
+
+<p align="center">
+  <img src="docs/reach_demo.gif" alt="Simulated SO-101 arm reaching three random targets" width="400">
+  <img src="docs/push_demo.gif" alt="Simulated SO-101 arm pushing a block onto a goal" width="400">
+</p>
+
+## At a glance
+
+- **Built:** custom Gymnasium environments for reaching and block pushing on the official
+  SO-101 MuJoCo model, PPO training and evaluation scripts, and a sim-to-real runner for the
+  physical arm.
+- **Reach:** 100% success (tip within 2 cm) on 200 held-out targets, median miss 0.12 cm;
+  99.5% with randomized physics, sensor noise and control delay. Trains in about 17 minutes
+  on a laptop CPU.
+- **Push:** a reward redesign took success from 4.5–6% to 39–84% at the same training budget
+  (two seeds each).
+- **How:** each improvement came from analysing failures, not from training longer: fixing
+  a reward that paid for touching the block instead of pushing it, and changing where
+  training targets come from.
+- **Evaluated carefully:** models compared on the same held-out test set, two seeds per
+  setting, and "best checkpoint" scores re-checked on fresh episodes.
+- **Real hardware:** a tested joint-to-servo mapping and safety layers (dry run by default,
+  joint clamping, rate limiting, typed confirmation, safe stop). 56 automated tests run on
+  every push.
+
+**Stack:** Python, PyTorch, Stable-Baselines3 (PPO), Gymnasium, MuJoCo, LeRobot, pytest,
+GitHub Actions.
+
+<p align="center"><img src="docs/results.svg" alt="Bar charts. Pushing: first reward 4.5% and 6%, redesigned reward 39% and 84% for seeds 0 and 1. Reaching: 90% with targets all around, 90% front only, 100% front only and evenly spread." width="760"></p>
 
 ## Results
 
@@ -15,7 +47,7 @@ block onto a goal.
 | Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
 | Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
 | Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
-| Push a block onto a goal (within 3 cm) | **84%** on 200 held-out episodes (best of two seeds; the other reached 42.5%), vs. 4.5–6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
+| Push a block onto a goal (within 3 cm) | **39% and 84%** on 200 held-out episodes (two seeds), vs. 4.5% and 6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
 
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
@@ -145,23 +177,23 @@ of the goal. This task is simulation only; `run_real.py` refuses push models.
 |---|---|---|---|
 | Reward for being near the block, plus distance to goal | 1.5M | 6% (100) | touched the block and shoved it in random directions |
 | Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 1.5M | 8% (100) | pushed the block further, not yet toward the goal |
-| Same, seed 0 | 30M (5.3 h) | 42.5% (200) | plateaued at 40–45% from 5M steps on |
+| Same, seed 0 | 20M / 30M (5.3 h) | 39% / 42.5% (200) | plateaued at 40–45% from 5M steps on |
 | **Same, seed 1** | 20M (4.4 h) | **84%** (200) | median final block-to-goal distance 1.6 cm |
 | Same reward + goal-distance curriculum, seed 0 | 20M (4.5 h) | 77% (200) | still improving when training ended |
 | First design again, seeds 0 and 1 (same-budget baseline) | 20M each (4.8 h) | 4.5% and 6% (200) | still touching and shoving after 20M steps |
 
 The first design is a classic reward-shaping trap: touching the block earned reward on its
 own, so the policy learned to touch rather than push. More training does not fix it: at the same
-20M steps, the first design reached 4.5% and 6% on the two seeds, against 42.5% and 84% for
+20M steps, the first design reached 4.5% and 6% on the two seeds, against 39% and 84% for
 the second.
 
-**Run-to-run variation is the biggest effect.** The same code and settings gave 42.5% with
-one random seed and 84% with another. That gap is larger than anything the curriculum did,
-so one run per setting can't show whether a change helped. The curriculum run (77%) beat the
-same-seed baseline (42.5%, trained for 30M steps), but with two seeds per setting that could still be chance. It
-also moved slowly: training success took 10M steps to pass 50% on the easiest goals.
+**Run-to-run variation is the biggest effect.** The same code and settings gave 39% with
+one random seed and 84% with another, both at 20M steps. That gap is larger than anything the
+curriculum did, so one run per setting can't show whether a change helped. The curriculum run
+(77%) beat the same-seed baseline (39%), but with one curriculum run that could still be
+chance. It also moved slowly: training success took 10M steps to pass 50% on the easiest goals.
 
-Other findings from the 42.5% run:
+Other findings from the seed-0 run (42.5% after 30M steps):
 - **Near misses and overshoot.** 52% of episodes got the block into the goal at some point,
   but 9.5% pushed it back out.
 - **Longer pushes are harder:** 50% success when the block started 6–9 cm from the goal,

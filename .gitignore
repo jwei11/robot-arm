@@ -6,3 +6,8 @@ __pycache__/
 runs/
 mapping_check.png
 *.egg-info/
+
+# Outputs from the hardware scripts
+bump_test.csv
+push.csv
+pose_check.png

@@ -1,7 +1,7 @@
 [project]
 name = "so101-rl"
 version = "0.1.0"
-description = "SO-101 reach task in MuJoCo with PPO, plus a gated real-arm runner"
+description = "Reinforcement learning for the SO-101 arm: reach and block-push tasks in MuJoCo with PPO, plus a gated real-arm runner"
 requires-python = ">=3.10,<3.11"
 
 [tool.setuptools]
