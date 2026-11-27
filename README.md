@@ -5,6 +5,7 @@
 ![MuJoCo](https://img.shields.io/badge/sim-MuJoCo%203.3-555)
 ![PPO](https://img.shields.io/badge/RL-PPO%20(Stable--Baselines3)-555)
 ![LeRobot](https://img.shields.io/badge/hardware-LeRobot-555)
+[![License: MIT](https://img.shields.io/badge/license-MIT-555)](LICENSE)
 
 A 5-joint [SO-101](https://github.com/TheRobotStudio/SO-ARM100) robot arm learns two skills
 with reinforcement learning in simulation: moving its gripper to any target in front of it,
@@ -275,6 +276,11 @@ Utilities written while bringing up the arm. All use LeRobot on `COM20` with cal
 | `record_motion.py` | record a hand-guided motion at 50 Hz and play it back (`motions/`) |
 | `monitor.py`, `arm_guard.py` | live servo telemetry and bump detection |
 | `bump_test.py`, `nudge_test.py` | measure tracking error and load; small motion test |
+
+## License
+
+MIT for this project's code (see [LICENSE](LICENSE)). The SO-101 model files in
+`assets/so101/` keep their own Apache-2.0 license.
 
 ## Acknowledgements
 
