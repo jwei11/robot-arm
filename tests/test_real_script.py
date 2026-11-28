@@ -115,3 +115,36 @@ def test_cli_gates():
 
 def test_joint_order_matches_env():
     assert tuple(ARM_JOINTS) == ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+
+
+def test_measure_needs_motion():
+    assert run_real.main(["--model", "x.zip", "--measure"]) == 2  # dry run: nothing to measure
+
+
+def test_ruler_frame_and_measurement_parsing():
+    p = np.array([0.25, -0.05, 0.12])
+    np.testing.assert_allclose(run_real.from_ruler_cm(run_real.to_ruler_cm(p)), p)
+    # origin below the base rotation axis: a point on that axis has x = y = 0
+    np.testing.assert_allclose(run_real.to_ruler_cm([*run_real.PAN_AXIS_XY, 0.1])[:2], 0.0, atol=1e-12)
+    np.testing.assert_allclose(run_real.parse_measurement(" 21.2, -5 12 "), [21.2, -5.0, 12.0])
+    assert run_real.parse_measurement("") is None
+    with pytest.raises(ValueError):
+        run_real.parse_measurement("1 2")
+    with pytest.raises(ValueError):
+        run_real.parse_measurement("a b c")
+
+
+def test_tip_report_and_summary(calibration):
+    mapping = SimRealMapping(calibration)
+    arm = run_real.FakeArm(mapping, start_q=np.array([0.0, -1.2, 1.2, 0.8, 0.0]))
+    r = run_real.Runner(arm, mapping, EnvConfig(control_hz=1000), np.radians(1.5), False, log=lambda s: None)
+    target = np.array(run_real.SAFE_TARGETS[0])
+    rep = r.tip_report(target)
+    tip = r.kin.fk(r.read_q())
+    assert rep["est_error_cm"] == pytest.approx(np.linalg.norm(tip - target) * 100, abs=0.01)
+    np.testing.assert_allclose(rep["est_tip_ruler_cm"], run_real.to_ruler_cm(tip), atol=0.01)
+    assert len(rep["tracking_error_deg"]) == 5
+    s = run_real.summarize([{"est_error_cm": 1.0}, {"est_error_cm": 3.0, "measured_error_cm": 2.5}])
+    assert s["targets"] == 2
+    assert s["est_error_cm"]["median"] == 2.0 and s["est_error_cm"]["within_2cm"] == 1
+    assert s["measured_error_cm"]["n"] == 1 and s["measured_error_cm"]["within_2cm"] == 0

@@ -33,7 +33,7 @@ and pushing a block onto a goal. The reach policy also runs on the physical arm 
 - **Evaluated carefully:** models compared on the same held-out test set, several seeds per
   setting, and "best checkpoint" scores re-checked on fresh episodes.
 - **Real hardware:** a tested joint-to-servo mapping and safety layers (dry run by default,
-  joint clamping, rate limiting, typed confirmation, safe stop). 56 automated tests run on
+  joint clamping, rate limiting, typed confirmation, safe stop). 59 automated tests run on
   every push.
 
 **Stack:** Python, PyTorch, Stable-Baselines3 (PPO), Gymnasium, MuJoCo, LeRobot, pytest,
@@ -142,7 +142,7 @@ train.py          PPO training (--task reach|push)
 evaluate.py       success rate, distance statistics, rollout video
 run_real.py       runs a trained reach policy on the physical arm (dry run by default)
 assets/so101/     official SO-101 MuJoCo model and meshes, plus reach and push scenes
-tests/            pytest suite (56 tests)
+tests/            pytest suite (59 tests)
 ```
 
 ## Reach environment
@@ -230,6 +230,19 @@ dry run:** it connects, reads the arm, and prints every command it *would* send.
    ```powershell
    .\.venv\Scripts\python.exe run_real.py --model runs\reach\best_model.zip --live --targets 0
    ```
+4. Accuracy check: the arm holds still at each target so the tip can be measured by hand:
+   ```powershell
+   .\.venv\Scripts\python.exe run_real.py --model runs\reach\best_model.zip --live --measure
+   ```
+   Measure the point between the jaw tips in centimetres: x forward from the base rotation
+   axis, y to the arm's left, z up from the table. Type `x y z`, or press Enter to skip.
+
+Every run writes `real_report.json`. For each target it records the tip position computed
+from the measured joint angles, its distance from the target, and each joint's tracking error
+(commanded minus measured angle). With `--measure` it also records the hand-measured
+position, its distance from the target, and how far the joint-angle estimate was from it.
+The estimate alone misses gear backlash and link flex, so the hand measurement is the
+real-world number.
 
 The arm moves slowly to a home pose, runs the policy toward each of five fixed safe targets
 (returning home in between), then returns to its starting pose. `--fake` runs the whole

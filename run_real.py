@@ -12,6 +12,12 @@ Examples (PowerShell, from the project folder):
   .\\.venv\\Scripts\\python.exe run_real.py --model runs\\ppo_reach\\best_model.zip --fake
   # real motion
   .\\.venv\\Scripts\\python.exe run_real.py --model runs\\ppo_reach\\best_model.zip --live
+  # real motion + accuracy check: pauses at each target so you can measure the tip by hand
+  .\\.venv\\Scripts\\python.exe run_real.py --model runs\\ppo_reach\\best_model.zip --live --measure
+
+Every policy run writes an accuracy report (--report, default real_report.json): per target,
+the tip position computed from the MEASURED joint angles, its distance to the target, and the
+servo tracking error; with --measure, also the tip position you measured with a ruler.
 
 Safety layers (in order, every control tick):
   1. policy action clipped to [-1, 1] and scaled by the training max_delta,
@@ -54,6 +60,46 @@ SAFE_TARGETS: list[tuple[float, float, float]] = [
 ]
 HARD_MAX_STEP_DEG = 3.0
 CALIB_MARGIN_DEG = 3.0
+# Hand measurements use a "ruler frame": origin on the table directly below the shoulder-pan
+# (base rotation) axis, x forward, y to the arm's left, z up. The model's base frame has the
+# table at z = 0 and the pan axis 3.88 cm forward of its origin.
+PAN_AXIS_XY = np.array([0.0388, 0.0])
+
+
+def to_ruler_cm(p_base: np.ndarray) -> np.ndarray:
+    """Base-frame point [m] -> ruler frame [cm]."""
+    return (np.asarray(p_base, float) - np.array([*PAN_AXIS_XY, 0.0])) * 100.0
+
+
+def from_ruler_cm(p_cm: np.ndarray) -> np.ndarray:
+    """Ruler frame [cm] -> base-frame point [m]."""
+    return np.asarray(p_cm, float) / 100.0 + np.array([*PAN_AXIS_XY, 0.0])
+
+
+def parse_measurement(text: str) -> np.ndarray | None:
+    """'x y z' in cm (commas allowed) -> array; blank -> None. Raises ValueError otherwise."""
+    parts = text.replace(",", " ").split()
+    if not parts:
+        return None
+    if len(parts) != 3:
+        raise ValueError("enter three numbers: x y z in cm")
+    return np.array([float(v) for v in parts])
+
+
+def summarize(results: list[dict]) -> dict:
+    """Error statistics [cm] over the targets in an accuracy report."""
+    out: dict = {"targets": len(results)}
+    for key in ("est_error_cm", "measured_error_cm"):
+        vals = np.array([r[key] for r in results if r.get(key) is not None], float)
+        if len(vals):
+            out[key] = {
+                "n": int(len(vals)),
+                "mean": round(float(vals.mean()), 2),
+                "median": round(float(np.median(vals)), 2),
+                "max": round(float(vals.max()), 2),
+                "within_2cm": int((vals <= 2.0).sum()),
+            }
+    return out
 
 
 # ----------------------------------------------------------------------------- arms
@@ -213,6 +259,18 @@ class Runner:
                 self.log(f"    step {t:3d}  est. tip distance {dist * 100:5.1f} cm")
         return dist
 
+    def tip_report(self, target: np.ndarray) -> dict:
+        """Where the arm is now vs the target, from the measured joint angles."""
+        q = self.read_q()
+        tip = self.kin.fk(q)
+        return {
+            "target_ruler_cm": to_ruler_cm(target).round(2).tolist(),
+            "est_tip_ruler_cm": to_ruler_cm(tip).round(2).tolist(),
+            "est_error_cm": round(float(np.linalg.norm(tip - target)) * 100, 2),
+            # commanded minus measured joint angle: servo lag, load sag, backlash
+            "tracking_error_deg": np.degrees(self.q_cmd - q).round(2).tolist(),
+        }
+
 
 def find_env_config(model_path: Path) -> EnvConfig:
     for d in (model_path.parent, model_path.parent.parent):
@@ -273,6 +331,13 @@ def parse_args(argv=None):
     p.add_argument("--steps", type=int, default=100, help="policy steps per target")
     p.add_argument("--max-step-deg", type=float, default=1.5, help=f"per-step joint change (<= {HARD_MAX_STEP_DEG})")
     p.add_argument("--max-relative-deg", type=float, default=5.0, help="LeRobot max_relative_target (deg mode)")
+    p.add_argument(
+        "--measure",
+        action="store_true",
+        help="pause at each target so you can measure the tip position by hand and type it in",
+    )
+    p.add_argument("--settle", type=float, default=0.5, help="seconds to hold before reading the final pose")
+    p.add_argument("--report", type=Path, default=Path("real_report.json"), help="accuracy report output")
     p.add_argument("--sign", action="append", default=[], metavar="JOINT=+1|-1", help="override a joint sign")
     return p.parse_args(argv)
 
@@ -290,6 +355,9 @@ def main(argv=None) -> int:
     if args.live and args.fake:
         print("--live and --fake are exclusive")
         return 2
+    if args.measure and not (args.live or args.fake):
+        print("--measure needs --live (or --fake for testing): in a dry run the arm doesn't move")
+        return 2
     if not args.check_mapping and args.model is None:
         print("--model is required (or use --check-mapping)")
         return 2
@@ -298,7 +366,8 @@ def main(argv=None) -> int:
         j, v = s.split("=")
         signs[j] = int(v)
     use_degrees = not args.range_mode
-    targets = [np.array(SAFE_TARGETS[i]) for i in (args.targets if args.targets else range(len(SAFE_TARGETS)))]
+    target_ids = list(args.targets) if args.targets else list(range(len(SAFE_TARGETS)))
+    targets = [np.array(SAFE_TARGETS[i]) for i in target_ids]
 
     dry_run = not args.live and not args.fake
     print(f"MODE: {'FAKE (simulated arm)' if args.fake else 'LIVE - THE ARM WILL MOVE' if args.live else 'DRY RUN'}")
@@ -339,14 +408,50 @@ def main(argv=None) -> int:
     print(f"Start pose (sim deg): {np.degrees(runner.q_start).round(1)}  control {cfg.control_hz:.0f} Hz")
     home = np.asarray(cfg.home_qpos, float)
 
+    mode = "fake" if args.fake else "live" if args.live else "dry_run"
+    report = {"mode": mode, "model": str(args.model), "steps": args.steps, "results": []}
+    if args.measure:
+        print(
+            "\n--measure: at each target the arm holds still. Measure the point between the jaw tips:\n"
+            "  x = forward from the base rotation axis, y = to the arm's left, z = up from the table (cm).\n"
+            "  Type 'x y z' and press Enter, or just Enter to skip. Ctrl+C returns to the start pose.\n"
+        )
+
     disable_torque_at_end = True
     try:
         runner.move_to(home, "home")
-        for tgt in targets:
-            d = runner.run_policy(policy, tgt, args.steps)
-            print(f"    final est. distance {d * 100:.1f} cm")
+        for i, tgt in zip(target_ids, targets, strict=True):
+            runner.run_policy(policy, tgt, args.steps)
+            if not dry_run and args.settle > 0:
+                time.sleep(args.settle)
+            r = {"target_index": int(i), **runner.tip_report(tgt)}
+            print(
+                f"    target {r['target_ruler_cm']} cm, est. tip {r['est_tip_ruler_cm']} cm, "
+                f"est. error {r['est_error_cm']:.1f} cm, tracking error {r['tracking_error_deg']} deg"
+            )
+            if args.measure:
+                while True:
+                    try:
+                        measured = parse_measurement(input("    measured tip x y z [cm] (Enter = skip): "))
+                        break
+                    except ValueError as e:
+                        print(f"    {e}")
+                if measured is not None:
+                    r["measured_tip_ruler_cm"] = measured.round(2).tolist()
+                    r["measured_error_cm"] = round(float(np.linalg.norm(from_ruler_cm(measured) - tgt)) * 100, 2)
+                    r["fk_vs_measured_cm"] = round(float(np.linalg.norm(np.array(r["est_tip_ruler_cm"]) - measured)), 2)
+                    print(
+                        f"    measured error {r['measured_error_cm']:.1f} cm "
+                        f"(the joint-angle estimate was off by {r['fk_vs_measured_cm']:.1f} cm)"
+                    )
+            report["results"].append(r)
+            report["summary"] = summarize(report["results"])
+            args.report.write_text(json.dumps(report, indent=2))  # after every target: survives Ctrl+C
             runner.move_to(home, "home")
         runner.move_to(runner.q_start, "start pose")
+        if report["results"]:
+            print(f"\nAccuracy report: {args.report}")
+            print(json.dumps(report["summary"], indent=2))
     except KeyboardInterrupt:
         print("\nCtrl+C: stopping policy, returning slowly to the start pose (Ctrl+C again to hold here).")
         try:
