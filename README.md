@@ -25,12 +25,12 @@ and pushing a block onto a goal. The reach policy also runs on the physical arm 
 - **Reach:** 100% success (tip within 2 cm) on 200 held-out targets, median miss 0.12 cm;
   99.5% with randomized physics, sensor noise and control delay. Trains in about 17 minutes
   on a laptop CPU.
-- **Push:** a reward redesign took success from 4.5–6% to 39–84% at the same training budget
-  (two seeds each).
+- **Push:** a reward redesign took success from 4.5–6% (two seeds) to 39–87.5% (three seeds,
+  mean 70%) at the same training budget.
 - **How:** each improvement came from analysing failures, not from training longer: fixing
   a reward that paid for touching the block instead of pushing it, and changing where
   training targets come from.
-- **Evaluated carefully:** models compared on the same held-out test set, two seeds per
+- **Evaluated carefully:** models compared on the same held-out test set, several seeds per
   setting, and "best checkpoint" scores re-checked on fresh episodes.
 - **Real hardware:** a tested joint-to-servo mapping and safety layers (dry run by default,
   joint clamping, rate limiting, typed confirmation, safe stop). 56 automated tests run on
@@ -48,7 +48,7 @@ GitHub Actions.
 | Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
 | Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
 | Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
-| Push a block onto a goal (within 3 cm) | **39% and 84%** on 200 held-out episodes (two seeds), vs. 4.5% and 6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
+| Push a block onto a goal (within 3 cm) **84% and 87.5%** on 200 held-out episodes for two of three seeds (the third reached 39%), vs. 4.5% and 6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
 
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
@@ -180,7 +180,9 @@ of the goal. This task is simulation only; `run_real.py` refuses push models.
 | Reward for reaching a point *behind* the block (away from the goal), plus per-step progress | 1.5M | 8% (100) | pushed the block further, not yet toward the goal |
 | Same, seed 0 | 20M / 30M (5.3 h) | 39% / 42.5% (200) | plateaued at 40–45% from 5M steps on |
 | **Same, seed 1** | 20M (4.4 h) | **84%** (200) | median final block-to-goal distance 1.6 cm |
+| **Same, seed 2** | 20M (4.3 h) | **87.5%** (200) | median final block-to-goal distance 1.0 cm |
 | Same reward + goal-distance curriculum, seed 0 | 20M (4.5 h) | 77% (200) | still improving when training ended |
+| Same + curriculum, seed 1 | 13M (crashed at 14.8M) | 4.5% (200) | never left the easiest stage; the same seed without curriculum scored 81.5% at 13M |
 | First design again, seeds 0 and 1 (same-budget baseline) | 20M each (4.8 h) | 4.5% and 6% (200) | still touching and shoving after 20M steps |
 
 The first design is a classic reward-shaping trap: touching the block earned reward on its
@@ -188,11 +190,13 @@ own, so the policy learned to touch rather than push. More training does not fix
 20M steps, the first design reached 4.5% and 6% on the two seeds, against 39% and 84% for
 the second.
 
-**Run-to-run variation is the biggest effect.** The same code and settings gave 39% with
-one random seed and 84% with another, both at 20M steps. That gap is larger than anything the
-curriculum did, so one run per setting can't show whether a change helped. The curriculum run
-(77%) beat the same-seed baseline (39%), but with one curriculum run that could still be
-chance. It also moved slowly: training success took 10M steps to pass 50% on the easiest goals.
+**Run-to-run variation is the biggest effect.** The same code and settings gave 39%, 84% and
+87.5% on three random seeds, all at 20M steps, so one run per setting can't show whether a
+change helped. The curriculum is the clearest example: on seed 0 it beat the same-seed
+baseline (77% vs. 39%), but on seed 1 it never got training success on the easiest goals past
+about 10%, stayed on that stage, and scored 4.5% against 81.5% for the same seed without it.
+A single run would have suggested either "the curriculum doubles success" or "the curriculum
+breaks training".
 
 Other findings from the seed-0 run (42.5% after 30M steps):
 - **Near misses and overshoot.** 52% of episodes got the block into the goal at some point,
@@ -205,8 +209,8 @@ Other findings from the seed-0 run (42.5% after 30M steps):
 
 `train.py --task push --curriculum` starts goals 4–7 cm from the block and widens the range in
 four steps up to 6–15 cm, each time training success over the last 200 episodes reaches 50%.
-Evaluation always uses the full range. Likely next steps: three or more seeds per setting, a
-faster curriculum, a reward term for holding the block in the goal, or SAC.
+Evaluation always uses the full range. Likely next steps: more seeds per setting, a curriculum
+that moves on by time as well as by success rate, a reward term for holding the block in the goal, or SAC.
 
 ## Running on the real arm
 
