@@ -24,7 +24,8 @@ and pushing a block onto a goal. The reach policy also runs on the physical arm 
   physical arm.
 - **Reach:** 100% success (tip within 2 cm) on 200 held-out targets, median miss 0.12 cm;
   99.5% with randomized physics, sensor noise and control delay. Trains in about 17 minutes
-  on a laptop CPU.
+  on a laptop CPU. Training with randomization kept success at 96% under harsher conditions,
+  where the standard policy fell to 70%.
 - **Push:** a reward redesign took success from 4.5–6% (two seeds) to 39–87.5% (three seeds,
   mean 70%) at the same training budget.
 - **How:** each improvement came from analysing failures, not from training longer: fixing
@@ -47,8 +48,9 @@ GitHub Actions.
 |---|---|
 | Reach a random 3D target | **100% success** (tip within 2 cm) on 200 held-out targets; median final distance **0.12 cm** |
 | Same, with randomized physics, sensor noise and control delay | 99.5% success (trained without randomization) |
+| Same, under harsher conditions than it trained on | 70% (trained without randomization) vs. **96%** (trained with randomization); see [Robustness](#robustness-training-with-randomization) |
 | Training cost | 2M steps, about 17 minutes on CPU (8 parallel environments) |
-| Push a block onto a goal (within 3 cm) **84% and 87.5%** on 200 held-out episodes for two of three seeds (the third reached 39%), vs. 4.5% and 6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
+| Push a block onto a goal (within 3 cm) | **84% and 87.5%** on 200 held-out episodes for two of three seeds (the third reached 39%), vs. 4.5% and 6% for the first reward design at the same 20M-step budget (see [Push task](#push-task)) |
 
 The policy has also run on a physical SO-101 follower arm. Real-world accuracy hasn't been
 measured yet.
@@ -91,6 +93,24 @@ Earlier runs, each scored on its own training distribution:
    lay where random *joint angles* almost never put a target (0 of 3,000 samples within 3 cm).
    `WorkspaceSampler` instead picks a 3 cm cell of the reachable space uniformly, then a point
    inside it. On the same test targets, that took success from 90% to 100%.
+
+### Robustness: training with randomization
+
+The real arm differs from the simulator: weaker servos, friction, sensor noise, delay. To see
+how much that matters, both policies were scored on the same 200 test targets at four levels
+of per-episode randomization (final models; the headline numbers above use the best checkpoint):
+
+| Test conditions | Trained without randomization (2M steps) | Trained with randomization (6M steps) |
+|---|---|---|
+| None | **100%** (median miss 0.10 cm) | 98% (0.25 cm) |
+| Training preset: servo strength 40–120%, friction ×0.5–2, 0.3° noise, 0–2 step delay | 98% | 98% |
+| Harsh: servo strength 25–60%, friction ×1–3, 1° noise, 1–3 step delay | 70% (1.26 cm) | **96%** (0.63 cm) |
+| Very harsh: servo strength 15–40%, friction ×2–4, 2° noise, 2–4 step delay | 33% | **69%** |
+
+The standard policy is the most precise in ideal conditions but falls apart outside them; the
+randomized one gives up a little precision for much more tolerance. It also needs more
+training: at 2M steps it reached only 94.5% even without randomization. Both will be compared
+on the real arm with `run_real.py --measure`.
 
 ## Quick start (Windows, PowerShell)
 
