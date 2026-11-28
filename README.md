@@ -172,7 +172,7 @@ tests/            pytest suite (59 tests)
 | Control | 20 Hz (25 × 2 ms physics steps); 100-step (5 s) episodes |
 | Action | 5 values in [-1, 1]: change in each joint's position target, at most 0.05 rad (2.9°) per step, clamped to joint limits minus 5°. The gripper is held closed. |
 | Observation (24) | joint angles, joint velocities, tip position, target position, scaled tip-to-target vector, previous action |
-| Reward | `-d + 0.5·[d < 2 cm] + (1 - tanh(d / 5 cm)) - 0.01·|a|²`, where d is the tip-to-target distance in metres |
+| Reward | `-d + 0.5·[d < 2 cm] + (1 - tanh(d / 5 cm)) - 0.01·‖a‖²`, where d is the tip-to-target distance in metres |
 | Targets | reachable by construction (forward kinematics of a valid, collision-free joint configuration), spread evenly over the reachable space, at least 5 cm above the table and within 90° of straight ahead |
 | Tip | the model's `gripperframe` site, between the jaws |
 
